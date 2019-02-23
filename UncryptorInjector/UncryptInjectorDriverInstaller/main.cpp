@@ -37,6 +37,9 @@ int main(int argc, char* argv[])
 {
 	if (argc == 2)
 	{
+		TCHAR DriverLocation[MAX_PATH];
+		SetupDriverName(DriverLocation, sizeof(DriverLocation));
+
 		if (!strcmp(argv[1], "-i"))
 		{
 			if (Install())
