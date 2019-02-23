@@ -1,40 +1,24 @@
-/*++
-Copyright (c) Microsoft Corporation.  All rights reserved.
-
-THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY
-KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR
-PURPOSE.
-
-Module Name:
-
-install.c
-
-Abstract:
-
-Win32 routines to dynamically load and unload a Windows NT kernel-mode
-driver using the Service Control Manager APIs.
-
-Environment:
-
-User mode only
-
---*/
-
-
-#include <windows.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strsafe.h>
+#define _ARM_WINAPI_PARTITION_DESKTOP_SDK_AVAILABLE 1
 #include "install.h"
+
+#include <stdio.h>
+#include <strsafe.h>
+
+//
+// Code taken from the Windows-driver-samples github repository.
+// https://github.com/Microsoft/Windows-driver-samples/blob/master/general/event/exe/install.c
+//
+
+//////////////////////////////////////////////////////////////////////////
+// Function prototypes.
+//////////////////////////////////////////////////////////////////////////
+
 BOOLEAN
 InstallDriver(
 	_In_ SC_HANDLE  SchSCManager,
 	_In_ LPCTSTR    DriverName,
 	_In_ LPCTSTR    ServiceExe
 );
-
 
 BOOLEAN
 RemoveDriver(
@@ -54,21 +38,16 @@ StopDriver(
 	_In_ LPCTSTR    DriverName
 );
 
+//////////////////////////////////////////////////////////////////////////
+// Private functions.
+//////////////////////////////////////////////////////////////////////////
+
 BOOLEAN
 InstallDriver(
 	_In_ SC_HANDLE  SchSCManager,
 	_In_ LPCTSTR    DriverName,
 	_In_ LPCTSTR    ServiceExe
 )
-/*++
-
-Routine Description:
-
-Arguments:
-
-Return Value:
-
---*/
 {
 	SC_HANDLE   schService;
 	DWORD       err;
@@ -84,7 +63,7 @@ Return Value:
 	//
 	// Create a new a service object.
 	//
-
+	printf("[UncryptInjector]: path: %s\n", ServiceExe);
 	schService = CreateService(SchSCManager,           // handle of service control manager database
 		DriverName,             // address of name of service to start
 		DriverName,             // address of display name
@@ -97,23 +76,21 @@ Return Value:
 		NULL,                   // no tag requested
 		NULL,                   // no dependency names
 		NULL,                   // use LocalSystem account
-		NULL                    // no password for service account
-	);
+		NULL);                  // no password for service account
 
-	if (schService == NULL) {
-
+	if (schService == NULL)
+	{
 		err = GetLastError();
 
-		if (err == ERROR_SERVICE_EXISTS) {
-
+		if (err == ERROR_SERVICE_EXISTS)
+		{
 			//
 			// Ignore this error.
 			//
-
 			return TRUE;
-
 		}
-		else if (err == ERROR_SERVICE_MARKED_FOR_DELETE) {
+		else if (err == ERROR_SERVICE_MARKED_FOR_DELETE)
+		{
 			//
 			// Previous instance of the service is not fully deleted so sleep
 			// and try again.
@@ -121,14 +98,13 @@ Return Value:
 			printf("Previous instance of the service is not fully deleted. Try again...\n");
 			return FALSE;
 		}
-		else {
-
+		else
+		{
 			printf("CreateService failed!  Error = %d \n", err);
 
 			//
 			// Indicate an error.
 			//
-
 			return  FALSE;
 		}
 	}
@@ -137,8 +113,8 @@ Return Value:
 	// Close the service object.
 	//
 
-	if (schService) {
-
+	if (schService)
+	{
 		CloseServiceHandle(schService);
 	}
 
@@ -147,133 +123,7 @@ Return Value:
 	//
 
 	return TRUE;
-
-}   // InstallDriver
-
-BOOLEAN
-ManageDriver(
-	_In_ LPCTSTR  DriverName,
-	_In_ LPCTSTR  ServiceName,
-	_In_ USHORT   Function
-)
-{
-
-	SC_HANDLE   schSCManager;
-
-	BOOLEAN rCode = TRUE;
-
-	//
-	// Insure (somewhat) that the driver and service names are valid.
-	//
-
-	if (!DriverName || !ServiceName) {
-
-		printf("Invalid Driver or Service provided to ManageDriver() \n");
-
-		return FALSE;
-	}
-
-	//
-	// Connect to the Service Control Manager and open the Services database.
-	//
-
-	schSCManager = OpenSCManager(NULL,                   // local machine
-		NULL,                   // local database
-		SC_MANAGER_ALL_ACCESS   // access required
-	);
-
-	if (!schSCManager) {
-
-		printf("Open SC Manager failed! Error = %d \n", GetLastError());
-
-		return FALSE;
-	}
-
-	//
-	// Do the requested function.
-	//
-
-	switch (Function) {
-
-	case DRIVER_FUNC_INSTALL:
-
-		//
-		// Install the driver service.
-		//
-
-		if (InstallDriver(schSCManager,
-			DriverName,
-			ServiceName
-		)) {
-
-			//
-			// Start the driver service (i.e. start the driver).
-			//
-
-			rCode = StartDriver(schSCManager,
-				DriverName
-			);
-
-		}
-		else {
-
-			//
-			// Indicate an error.
-			//
-
-			rCode = FALSE;
-		}
-
-		break;
-
-	case DRIVER_FUNC_REMOVE:
-
-		//
-		// Stop the driver.
-		//
-
-		StopDriver(schSCManager,
-			DriverName
-		);
-
-		//
-		// Remove the driver service.
-		//
-
-		RemoveDriver(schSCManager,
-			DriverName
-		);
-
-		//
-		// Ignore all errors.
-		//
-
-		rCode = TRUE;
-
-		break;
-
-	default:
-
-		printf("Unknown ManageDriver() function. \n");
-
-		rCode = FALSE;
-
-		break;
-	}
-
-	//
-	// Close handle to service control manager.
-	//
-
-	if (schSCManager) {
-
-		CloseServiceHandle(schSCManager);
-	}
-
-	return rCode;
-
-}   // ManageDriver
-
+}
 
 BOOLEAN
 RemoveDriver(
@@ -290,11 +140,10 @@ RemoveDriver(
 
 	schService = OpenService(SchSCManager,
 		DriverName,
-		SERVICE_ALL_ACCESS
-	);
+		SERVICE_ALL_ACCESS);
 
-	if (schService == NULL) {
-
+	if (schService == NULL)
+	{
 		printf("OpenService failed!  Error = %d \n", GetLastError());
 
 		//
@@ -308,17 +157,16 @@ RemoveDriver(
 	// Mark the service for deletion from the service control manager database.
 	//
 
-	if (DeleteService(schService)) {
-
+	if (DeleteService(schService))
+	{
 		//
 		// Indicate success.
 		//
 
 		rCode = TRUE;
-
 	}
-	else {
-
+	else
+	{
 		printf("DeleteService failed!  Error = %d \n", GetLastError());
 
 		//
@@ -332,16 +180,13 @@ RemoveDriver(
 	// Close the service object.
 	//
 
-	if (schService) {
-
+	if (schService)
+	{
 		CloseServiceHandle(schService);
 	}
 
 	return rCode;
-
-}   // RemoveDriver
-
-
+}
 
 BOOLEAN
 StartDriver(
@@ -358,11 +203,10 @@ StartDriver(
 
 	schService = OpenService(SchSCManager,
 		DriverName,
-		SERVICE_ALL_ACCESS
-	);
+		SERVICE_ALL_ACCESS);
 
-	if (schService == NULL) {
-
+	if (schService == NULL)
+	{
 		printf("OpenService failed!  Error = %d \n", GetLastError());
 
 		//
@@ -378,22 +222,21 @@ StartDriver(
 
 	if (!StartService(schService,     // service identifier
 		0,              // number of arguments
-		NULL            // pointer to arguments
-	)) {
+		NULL))          // pointer to arguments
+	{
 
 		err = GetLastError();
 
-		if (err == ERROR_SERVICE_ALREADY_RUNNING) {
-
+		if (err == ERROR_SERVICE_ALREADY_RUNNING)
+		{
 			//
 			// Ignore this error.
 			//
 
 			return TRUE;
-
 		}
-		else {
-
+		else
+		{
 			printf("StartService failure! Error = %d \n", err);
 
 			//
@@ -402,23 +245,19 @@ StartDriver(
 
 			return FALSE;
 		}
-
 	}
 
 	//
 	// Close the service object.
 	//
 
-	if (schService) {
-
+	if (schService)
+	{
 		CloseServiceHandle(schService);
 	}
 
 	return TRUE;
-
-}   // StartDriver
-
-
+}
 
 BOOLEAN
 StopDriver(
@@ -436,11 +275,10 @@ StopDriver(
 
 	schService = OpenService(SchSCManager,
 		DriverName,
-		SERVICE_ALL_ACCESS
-	);
+		SERVICE_ALL_ACCESS);
 
-	if (schService == NULL) {
-
+	if (schService == NULL)
+	{
 		printf("OpenService failed!  Error = %d \n", GetLastError());
 
 		return FALSE;
@@ -452,18 +290,16 @@ StopDriver(
 
 	if (ControlService(schService,
 		SERVICE_CONTROL_STOP,
-		&serviceStatus
-	)) {
-
+		&serviceStatus))
+	{
 		//
 		// Indicate success.
 		//
 
 		rCode = TRUE;
-
 	}
-	else {
-
+	else
+	{
 		printf("ControlService failed!  Error = %d \n", GetLastError());
 
 		//
@@ -477,18 +313,131 @@ StopDriver(
 	// Close the service object.
 	//
 
-	if (schService) {
-
+	if (schService)
+	{
 		CloseServiceHandle(schService);
 	}
 
 	return rCode;
+}
 
-}   //  StopDriver
+//////////////////////////////////////////////////////////////////////////
+// Public functions.
+//////////////////////////////////////////////////////////////////////////
+
+BOOLEAN
+ManageDriver(
+	_In_ LPCTSTR  DriverName,
+	_In_ LPCTSTR  ServiceName,
+	_In_ USHORT   Function
+)
+{
+	SC_HANDLE   schSCManager;
+
+	BOOLEAN rCode = TRUE;
+
+	//
+	// Insure (somewhat) that the driver and service names are valid.
+	//
+
+	if (!DriverName || !ServiceName)
+	{
+		printf("Invalid Driver or Service provided to ManageDriver() \n");
+
+		return FALSE;
+	}
+
+	//
+	// Connect to the Service Control Manager and open the Services database.
+	//
+
+	schSCManager = OpenSCManager(NULL,                   // local machine
+		NULL,                   // local database
+		SC_MANAGER_ALL_ACCESS); // access required
+
+	if (!schSCManager)
+	{
+		printf("Open SC Manager failed! Error = %d \n", GetLastError());
+
+		return FALSE;
+	}
+
+	//
+	// Do the requested function.
+	//
+
+	switch (Function)
+	{
+	case DRIVER_FUNC_INSTALL:
+
+		//
+		// Install the driver service.
+		//
+
+		if (InstallDriver(schSCManager,
+			DriverName,
+			ServiceName))
+		{
+			//
+			// Start the driver service (i.e. start the driver).
+			//
+			printf("[UncryptInstaller] Can inject\n");
+			rCode = StartDriver(schSCManager, DriverName);
+		}
+		else
+		{
+			//
+			// Indicate an error.
+			//
+
+			rCode = FALSE;
+		}
+
+		break;
+
+	case DRIVER_FUNC_REMOVE:
+
+		//
+		// Stop the driver.
+		//
+
+		StopDriver(schSCManager, DriverName);
+
+		//
+		// Remove the driver service.
+		//
+
+		RemoveDriver(schSCManager, DriverName);
+
+		//
+		// Ignore all errors.
+		//
+
+		rCode = TRUE;
+		break;
+
+	default:
+		printf("Unknown ManageDriver() function. \n");
+
+		rCode = FALSE;
+		break;
+	}
+
+	//
+	// Close handle to service control manager.
+	//
+
+	if (schSCManager)
+	{
+		CloseServiceHandle(schSCManager);
+	}
+
+	return rCode;
+}
 
 BOOLEAN
 SetupDriverName(
-	_Inout_updates_bytes_all_(BufferLength) PCHAR DriverLocation,
+	_Inout_updates_bytes_all_(BufferLength) PTCHAR DriverLocation,
 	_In_ ULONG BufferLength
 )
 {
@@ -500,11 +449,10 @@ SetupDriverName(
 	//
 
 	driverLocLen = GetCurrentDirectory(BufferLength,
-		DriverLocation
-	);
+		DriverLocation);
 
-	if (driverLocLen == 0) {
-
+	if (driverLocLen == 0)
+	{
 		printf("GetCurrentDirectory failed!  Error = %d \n", GetLastError());
 
 		return FALSE;
@@ -513,7 +461,9 @@ SetupDriverName(
 	//
 	// Setup path name to driver file.
 	//
-	if (FAILED(StringCbCat(DriverLocation, BufferLength, "\\"DRIVER_NAME".sys"))) {
+
+	if (FAILED(StringCbCat(DriverLocation, BufferLength, TEXT("\\" DRIVER_NAME ".sys"))))
+	{
 		return FALSE;
 	}
 
@@ -527,10 +477,8 @@ SetupDriverName(
 		NULL,
 		OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL,
-		NULL
-	)) == INVALID_HANDLE_VALUE) {
-
-
+		NULL)) == INVALID_HANDLE_VALUE)
+	{
 		printf("%s.sys is not loaded.\n", DRIVER_NAME);
 
 		//
@@ -544,8 +492,8 @@ SetupDriverName(
 	// Close open file handle.
 	//
 
-	if (fileHandle) {
-
+	if (fileHandle)
+	{
 		CloseHandle(fileHandle);
 	}
 
@@ -554,8 +502,4 @@ SetupDriverName(
 	//
 
 	return TRUE;
-
-
-}   // SetupDriverName
-
-
+}

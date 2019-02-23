@@ -50,8 +50,19 @@ extern "C"
 			_In_ PVOID ImageBase,
 			_In_ PCCH RoutineNam
 		);
+	NTSYSAPI
+		NTSTATUS
+		NTAPI
+		RtlDuplicateUnicodeString(
+			_In_ ULONG Flags,
+			_In_ PUNICODE_STRING StringIn,
+			_Out_ PUNICODE_STRING StringOut
+		);
 
 	#define UNCRYPT_MEMORY_TAG 'unc' // for the ExAllocatePoolWithTag
+	#define RTL_DUPLICATE_UNICODE_STRING_NULL_TERMINATE (0x00000001)
+	#define RTL_DUPLICATE_UNICODE_STRING_ALLOCATE_NULL_STRING (0x00000002)
+
 	LIST_ENTRY g_head_of_linked_list;
 	UNICODE_STRING DLL_X32_PATH_TO_INJECT;
 	UNICODE_STRING DLL_X64_PATH_TO_INJECT;

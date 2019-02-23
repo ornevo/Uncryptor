@@ -7,7 +7,7 @@ extern "C"
 	VOID NTAPI DriverDestroy(PDRIVER_OBJECT DriverObject);
 	NTSTATUS NTAPI UncryptInit(_In_ PUNICODE_STRING RegisteryPath);
 	VOID NTAPI DestroyList();
-	VOID NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath);
+	NTSTATUS NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath);
 	struct _UNCRYPT_INJECT_INFO
 	{
 		LIST_ENTRY ListEntry; // the list entry for the double linked list

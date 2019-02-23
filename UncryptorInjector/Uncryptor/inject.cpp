@@ -13,6 +13,8 @@ DriverDestroy(
 	UncryptDbg("[UncryptInjector] Destroying Driver...\n");
 	PsRemoveLoadImageNotifyRoutine(&ImageNotifyHook);
 	PsSetCreateProcessNotifyRoutineEx(&ProcessNotifyHook, TRUE);
+	RtlFreeUnicodeString(&DLL_X32_PATH_TO_INJECT);
+	RtlFreeUnicodeString(&DLL_X64_PATH_TO_INJECT);
 	DestroyList();
 }
 
@@ -23,6 +25,7 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
 	NTSTATUS Status = UncryptInit(RegisteryPath);
 	if (!NT_SUCCESS(Status))
 	{
+		UncryptDbg("[UncryptInjector] Error at setting up the Uncrypt...\n");
 		return Status;
 	}
 
@@ -42,12 +45,12 @@ NTSTATUS NTAPI UncryptInit(_In_ PUNICODE_STRING RegisteryPath)
 		return Status;
 	}
 
-	Status = PsSetLoadImageNotifyRoutineEx(&ImageNotifyHook, 0);
+	Status = PsSetLoadImageNotifyRoutine(&ImageNotifyHook);
 	if (!NT_SUCCESS(Status))
 	{
 		PsSetCreateProcessNotifyRoutineEx(&ProcessNotifyHook, TRUE);
 	}
-	return Status;
+	return STATUS_SUCCESS;
 }
 
 
@@ -62,7 +65,7 @@ VOID NTAPI DestroyList()
 	}
 }
 
-VOID NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
+NTSTATUS NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 {
 	NTSTATUS Status;
 	UNICODE_STRING ValueImagePath = RTL_CONSTANT_STRING(L"ImagePath");
@@ -76,7 +79,7 @@ VOID NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 	Status = ZwOpenKey(&MyHandle, KEY_READ, &object_attributes);
 	if (!NT_SUCCESS(Status))
 	{
-		return;
+		return Status;
 	}
 	
 	UCHAR KeyValueInformationBuffer[sizeof(KEY_VALUE_FULL_INFORMATION) + sizeof(WCHAR) * 128];
@@ -85,13 +88,12 @@ VOID NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 	Status = ZwQueryValueKey(MyHandle, &ValueImagePath, KeyValueFullInformation, KeyValueInformation, sizeof(KeyValueInformationBuffer), &ResultSize);
 	ZwClose(MyHandle);
 
-	if (!NT_SUCCESS(Status) || KeyValueInformation->Type != REG_EXPAND_SZ)
+	if (!NT_SUCCESS(Status) || KeyValueInformation->Type != REG_EXPAND_SZ || KeyValueInformation->DataLength < sizeof(ObpDosDevicesShortName))
 	{
-		return;
+		return Status;
 	}
 	PWCHAR ImagePathValue = (PWCHAR)((PUCHAR)KeyValueInformation + KeyValueInformation->DataOffset);
 	ULONG  ImagePathValueLength = KeyValueInformation->DataLength;
-
 	if (*(PULONGLONG)(ImagePathValue) == ObpDosDevicesShortNamePrefix.Alignment.QuadPart)
 	{
 		ImagePathValue += ObpDosDevicesShortName.Length / sizeof(WCHAR);
@@ -100,21 +102,43 @@ VOID NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 	PWCHAR LastBackslash = wcsrchr(ImagePathValue, L'\\');
 	if (!LastBackslash)
 	{
-		return;
+		return STATUS_DATA_ERROR;
 	}
 	*LastBackslash = UNICODE_NULL;
 	UNICODE_STRING Directory;
-	RtlInitUnicodeString(&Directory, ImagePathValue);
 
+	ULONG Flags = RTL_DUPLICATE_UNICODE_STRING_NULL_TERMINATE
+		| RTL_DUPLICATE_UNICODE_STRING_ALLOCATE_NULL_STRING;
+
+	RtlInitUnicodeString(&Directory, ImagePathValue);
 #define UNCRYPT_DLL_X64_NAME L"Uncryptdllx64.dll"
 	UNICODE_STRING InjDllNamex64 = RTL_CONSTANT_STRING(UNCRYPT_DLL_X64_NAME);
-	JoinPath(&Directory, &InjDllNamex64, &DLL_X64_PATH_TO_INJECT);
-	UncryptDbg("[UncryptorInject] Dll path (x64): '%wZ'\n", DLL_X64_PATH_TO_INJECT);
+	UNICODE_STRING tmp;
+	WCHAR DLL_X64_BUFF[128];
+	tmp.Length = 0;
+	tmp.MaximumLength = 128;
+	tmp.Buffer = DLL_X64_BUFF;
+	JoinPath(&Directory, &InjDllNamex64, &tmp);
+	RtlDuplicateUnicodeString(Flags,
+		&tmp,
+		&DLL_X64_PATH_TO_INJECT);
+
+	UncryptDbg("[UncryptorInjector] Dll path (x64): '%wZ'\n", &DLL_X64_PATH_TO_INJECT);
 #define UNCRYPT_DLL_X86_NAME L"Uncryptdllx86.dll"
 	UNICODE_STRING InjDllNamex86 = RTL_CONSTANT_STRING(UNCRYPT_DLL_X86_NAME);
-	JoinPath(&Directory, &InjDllNamex86, &DLL_X32_PATH_TO_INJECT);
-	UncryptDbg("[UncryptorInject] Dll path (x64): '%wZ'\n", DLL_X32_PATH_TO_INJECT);
+	WCHAR DLL_X32_BUFF[128];
+	tmp.Length = 0;
+	tmp.MaximumLength = 128;
+	tmp.Buffer = DLL_X32_BUFF;
+	JoinPath(&Directory, &InjDllNamex86, &tmp);
 
+	RtlDuplicateUnicodeString(Flags,
+		&tmp,
+		&DLL_X32_PATH_TO_INJECT);
+
+	//TODO free the unicode
+	UncryptDbg("[UncryptorInjector] Dll path (x32): '%wZ'\n", &DLL_X32_PATH_TO_INJECT);
+	return STATUS_SUCCESS;
 }
 
 
@@ -125,13 +149,15 @@ VOID NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 
 VOID ProcessNotifyHook(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo)
 {
-	UncryptDbg("[UncryptorInjector] Process Created: %d\n", (ULONG)(ULONG_PTR)ProcessId);
+	
 	if (CreateInfo) //Creating
 	{
+		UncryptDbg("[UncryptorInjector] Process Created: %d\n", (ULONG)(ULONG_PTR)ProcessId);
 		InsertToList(Process,ProcessId);
 	}
 	else //exiting
 	{
+		UncryptDbg("[UncryptorInjector] Process Exiting: %d\n", (ULONG)(ULONG_PTR)ProcessId);
 		RemoveFromList(ProcessId);
 	}
 }
@@ -178,7 +204,14 @@ VOID ImageNotifyHook(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INF
 	{
 		//DO THE APC INJECTION
 		UncryptDbg("[UncryptInjector] Injecting (PID: %d)\n", (ULONG)(ULONG_PTR)ProcessId);
-
+		if (!NT_SUCCESS(UncryptApcQueue(KernelMode,
+			&UncryptInjectApcNormalRoutine,
+			info,
+			NULL,
+			NULL)))
+		{
+			UncryptDbg("[UncryptInjector] UncryptApcQueue Error\n ");
+		}
 		info->IsInjected = TRUE;
 	}
 }
@@ -186,8 +219,13 @@ VOID ImageNotifyHook(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INF
 BOOLEAN CanInject(_UNCRYPT_INJECT_INFO *info)
 {
 	ULONG RequiredDlls = UNCRYPT_DLL_LOAD_NTDLL_32BIT_DLL;
-
-	//TODO add code for the 64 bits.
+	if (info->IsWoW64)
+	{
+		RequiredDlls |= UNCRYPT_DLL_LOAD_WOW64_DLL;
+		RequiredDlls |= UNCRYPT_DLL_LOAD_WOW64WIN_DLL;
+		RequiredDlls |= UNCRYPT_DLL_LOAD_WOW64CPU_DLL;
+		RequiredDlls |= UNCRYPT_DLL_LOAD_NTDLL_WOW64_DLL;
+	}
 
 	return (RequiredDlls & info->LoadedDlls) == RequiredDlls;
 }
@@ -238,9 +276,12 @@ NTSTATUS InsertToList(PEPROCESS ProcessFrame, HANDLE Process)
 VOID RemoveFromList(HANDLE Process)
 {
 	_UNCRYPT_INJECT_INFO *InjectInfo = SearchInList(Process);
-	RemoveEntryList(&InjectInfo->ListEntry);
+	if (InjectInfo)
+	{
+		RemoveEntryList(&InjectInfo->ListEntry);
 
-	ExFreePoolWithTag(InjectInfo, UNCRYPT_MEMORY_TAG);
+		ExFreePoolWithTag(InjectInfo, UNCRYPT_MEMORY_TAG);
+	}
 }
 
 
@@ -294,8 +335,12 @@ UncryptInjectApcNormalRoutine(
 {
 	UNREFERENCED_PARAMETER(SystemArgument1);
 	UNREFERENCED_PARAMETER(SystemArgument2);
+	UncryptDbg("[UncryptInjector] In APC at process\n ");
 	_UNCRYPT_INJECT_INFO *info = (_UNCRYPT_INJECT_INFO*)NormalContext;
-	UncryptorInject(info);
+	if (!NT_SUCCESS(UncryptorInject(info)))
+	{
+		UncryptDbg("[UncryptInjector] UncryptInjectApcNormalRoutine Error at UncryptInject\n ");
+	}
 
 }
 
@@ -346,7 +391,11 @@ UncryptorInject(_UNCRYPT_INJECT_INFO* info)
 	{
 		return Status;
 	}
-	InjectThunkLess(info, SectionHandle, SectionSize);
+	UncryptDbg("[UncryptInjector] Created Sections for mappings\n ");
+	if (!NT_SUCCESS(Status = InjectThunkLess(info, SectionHandle, SectionSize)))
+	{
+		UncryptDbg("[UncryptInjector] Error at inject thunk less: %ld\n ", Status);
+	}
 	return STATUS_SUCCESS;
 }
 
@@ -358,7 +407,7 @@ InjectThunkLess(
 	SIZE_T SectionSize)
 {
 	NTSTATUS Status;
-	PVOID AddressOfSection;
+	PVOID AddressOfSection = NULL;
 	Status = ZwMapViewOfSection(SectionHandle,
 		ZwCurrentProcess(),
 		&AddressOfSection,
@@ -373,6 +422,7 @@ InjectThunkLess(
 
 	if (!NT_SUCCESS(Status))
 	{
+		UncryptDbg("[UncryptInjector] Error at ZwMapViewOfSection: %X\n ", Status);
 		return Status;
 	}
 
@@ -399,7 +449,7 @@ InjectThunkLess(
 		NULL,
 		DllPath
 	);
-
+	UncryptDbg("[UncryptInjector] Finish Injecting\n");
 	//
 	// 4th param. of LdrLoadDll (BaseAddress) is actually an output parameter.
 	//

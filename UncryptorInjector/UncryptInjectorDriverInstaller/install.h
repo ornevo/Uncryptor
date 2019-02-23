@@ -4,7 +4,7 @@
 #define DRIVER_FUNC_INSTALL     0x01
 #define DRIVER_FUNC_REMOVE      0x02
 
-#define DRIVER_NAME             "uncryptdrv"
+#define DRIVER_NAME             "UncryptorInjector"
 
 
 BOOLEAN
