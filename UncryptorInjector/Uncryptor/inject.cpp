@@ -3,6 +3,7 @@
 #include "constants.h"
 #include "apc_injecting.h"
 
+#define UNCRYPT_DLL_X64_NAME L"UncryptorDLL.dll"
 VOID
 NTAPI
 DriverDestroy(
@@ -13,7 +14,6 @@ DriverDestroy(
 	UncryptDbg("[UncryptInjector] Destroying Driver...\n");
 	PsRemoveLoadImageNotifyRoutine(&ImageNotifyHook);
 	PsSetCreateProcessNotifyRoutineEx(&ProcessNotifyHook, TRUE);
-	RtlFreeUnicodeString(&DLL_X32_PATH_TO_INJECT);
 	RtlFreeUnicodeString(&DLL_X64_PATH_TO_INJECT);
 	DestroyList();
 }
@@ -81,7 +81,7 @@ NTSTATUS NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 	{
 		return Status;
 	}
-	
+
 	UCHAR KeyValueInformationBuffer[sizeof(KEY_VALUE_FULL_INFORMATION) + sizeof(WCHAR) * 128];
 	PKEY_VALUE_FULL_INFORMATION KeyValueInformation = (PKEY_VALUE_FULL_INFORMATION)KeyValueInformationBuffer;
 	ULONG ResultSize;
@@ -111,7 +111,6 @@ NTSTATUS NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 		| RTL_DUPLICATE_UNICODE_STRING_ALLOCATE_NULL_STRING;
 
 	RtlInitUnicodeString(&Directory, ImagePathValue);
-#define UNCRYPT_DLL_X64_NAME L"Uncryptdllx64.dll"
 	UNICODE_STRING InjDllNamex64 = RTL_CONSTANT_STRING(UNCRYPT_DLL_X64_NAME);
 	UNICODE_STRING tmp;
 	WCHAR DLL_X64_BUFF[128];
@@ -124,20 +123,6 @@ NTSTATUS NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 		&DLL_X64_PATH_TO_INJECT);
 
 	UncryptDbg("[UncryptorInjector] Dll path (x64): '%wZ'\n", &DLL_X64_PATH_TO_INJECT);
-#define UNCRYPT_DLL_X86_NAME L"Uncryptdllx86.dll"
-	UNICODE_STRING InjDllNamex86 = RTL_CONSTANT_STRING(UNCRYPT_DLL_X86_NAME);
-	WCHAR DLL_X32_BUFF[128];
-	tmp.Length = 0;
-	tmp.MaximumLength = 128;
-	tmp.Buffer = DLL_X32_BUFF;
-	JoinPath(&Directory, &InjDllNamex86, &tmp);
-
-	RtlDuplicateUnicodeString(Flags,
-		&tmp,
-		&DLL_X32_PATH_TO_INJECT);
-
-	//TODO free the unicode
-	UncryptDbg("[UncryptorInjector] Dll path (x32): '%wZ'\n", &DLL_X32_PATH_TO_INJECT);
 	return STATUS_SUCCESS;
 }
 
@@ -149,15 +134,13 @@ NTSTATUS NTAPI SetDefaultPath(_In_ PUNICODE_STRING RegistryPath)
 
 VOID ProcessNotifyHook(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO CreateInfo)
 {
-	
+
 	if (CreateInfo) //Creating
 	{
-		UncryptDbg("[UncryptorInjector] Process Created: %d\n", (ULONG)(ULONG_PTR)ProcessId);
-		InsertToList(Process,ProcessId);
+		InsertToList(Process, ProcessId);
 	}
 	else //exiting
 	{
-		UncryptDbg("[UncryptorInjector] Process Exiting: %d\n", (ULONG)(ULONG_PTR)ProcessId);
 		RemoveFromList(ProcessId);
 	}
 }
@@ -165,7 +148,7 @@ VOID ProcessNotifyHook(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_IN
 VOID ImageNotifyHook(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo)
 {
 	_UNCRYPT_INJECT_INFO *info = SearchInList(ProcessId);
-	if (!info || info->IsInjected)
+	if (!info)
 	{
 		return;
 	}
@@ -173,7 +156,7 @@ VOID ImageNotifyHook(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INF
 	{
 		// For now dont handle is wow64.
 		// TODO: remove the value from the linked list.
-		return; 
+		return;
 	}
 	if (PsIsProtectedProcess(PsGetCurrentProcess()))
 	{
@@ -181,7 +164,6 @@ VOID ImageNotifyHook(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INF
 		// TODO: remove the value from linked list.
 		return;
 	}
-	UncryptDbg("[UncryptInjector] Image notify on process %d\n", (ULONG)(ULONG_PTR)ProcessId);
 	if (!CanInject(info))
 	{
 		for (LONG index = 0; index < RTL_NUMBER_OF(DLLS_DESCRIPTORS); index++)
@@ -192,7 +174,7 @@ VOID ImageNotifyHook(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INF
 				PVOID LdrLoadLibFunction = RtlFindExportedRoutineByName(ImageInfo->ImageBase, "LdrLoadDll");
 				LONG DllFlag = DLLS_DESCRIPTORS[index].Flags;
 				info->LoadedDlls |= DllFlag;
-				
+
 				if (DllFlag == UNCRYPT_DLL_LOAD_NTDLL_32BIT_DLL)
 				{
 					info->LdrLoadDllRoutineAddress = LdrLoadLibFunction;
@@ -202,31 +184,48 @@ VOID ImageNotifyHook(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INF
 	}
 	else
 	{
-		//DO THE APC INJECTION
-		UncryptDbg("[UncryptInjector] Injecting (PID: %d)\n", (ULONG)(ULONG_PTR)ProcessId);
-		if (!NT_SUCCESS(UncryptApcQueue(KernelMode,
-			&UncryptInjectApcNormalRoutine,
-			info,
-			NULL,
-			NULL)))
+		if (!info->IsInjected)
 		{
-			UncryptDbg("[UncryptInjector] UncryptApcQueue Error\n ");
+			//DO THE APC INJECTION
+			if (!NT_SUCCESS(UncryptApcQueue(KernelMode,
+				&UncryptInjectApcNormalRoutine,
+				info,
+				NULL,
+				NULL)))
+			{
+				UncryptDbg("[UncryptInjector] UncryptApcQueue Error\n ");
+			}
+			info->IsInjected = TRUE;
 		}
-		info->IsInjected = TRUE;
+		else
+		{
+			if (RtlSuffixUnicodeString(&DLL_UNCRYPTOR.Path, FullImageName, TRUE) && !info->IsLoaded)
+			{
+				PVOID HookFunctionAddress = RtlFindExportedRoutineByName(ImageInfo->ImageBase, "HookFunctions");
+				info->HookAllRoutineAddress = HookFunctionAddress;
+				UncryptDbg("[UncryptInjector] Image UncryptDll found in process %p\n", HookFunctionAddress);
+				info->IsLoaded = TRUE;
+				IterateOverFlagsAndNotify(info);
+			}
+			else if(info->IsLoaded)
+			{
+				//UncryptDbg("[UncryptInjector] Image notify on process %wZ\n", FullImageName);
+				
+				for (ULONG index = 0; index < RTL_NUMBER_OF(DLLS_DESCRIPTORS); index++)
+				{
+					if (DLLS_DESCRIPTORS[index].NeedToNotify)
+					{
+						NotifyUncryptorDLL(info, DLLS_DESCRIPTORS[index].Flags);
+					}
+				}
+			}
+		}
 	}
 }
 
 BOOLEAN CanInject(_UNCRYPT_INJECT_INFO *info)
 {
-	ULONG RequiredDlls = UNCRYPT_DLL_LOAD_NTDLL_32BIT_DLL;
-	if (info->IsWoW64)
-	{
-		RequiredDlls |= UNCRYPT_DLL_LOAD_WOW64_DLL;
-		RequiredDlls |= UNCRYPT_DLL_LOAD_WOW64WIN_DLL;
-		RequiredDlls |= UNCRYPT_DLL_LOAD_WOW64CPU_DLL;
-		RequiredDlls |= UNCRYPT_DLL_LOAD_NTDLL_WOW64_DLL;
-	}
-
+	ULONG RequiredDlls = UNCRYPT_DLL_LOAD_NTDLL_32BIT_DLL | UNCRYPT_DLL_LOAD_KERNEL32_DLL | UNCRYPT_DLL_LOAD_KERNELBASE_DLL;
 	return (RequiredDlls & info->LoadedDlls) == RequiredDlls;
 }
 
@@ -335,7 +334,6 @@ UncryptInjectApcNormalRoutine(
 {
 	UNREFERENCED_PARAMETER(SystemArgument1);
 	UNREFERENCED_PARAMETER(SystemArgument2);
-	UncryptDbg("[UncryptInjector] In APC at process\n ");
 	_UNCRYPT_INJECT_INFO *info = (_UNCRYPT_INJECT_INFO*)NormalContext;
 	if (!NT_SUCCESS(UncryptorInject(info)))
 	{
@@ -347,10 +345,10 @@ UncryptInjectApcNormalRoutine(
 VOID
 NTAPI
 UncryptInjectApcKernelRoutine(
-	PKAPC Apc, 
+	PKAPC Apc,
 	PKNORMAL_ROUTINE * NormalRoutine,
-	PVOID * NormalContext, 
-	PVOID * SystemArgument1, 
+	PVOID * NormalContext,
+	PVOID * SystemArgument1,
 	PVOID * SystemArgument2
 )
 {
@@ -391,7 +389,6 @@ UncryptorInject(_UNCRYPT_INJECT_INFO* info)
 	{
 		return Status;
 	}
-	UncryptDbg("[UncryptInjector] Created Sections for mappings\n ");
 	if (!NT_SUCCESS(Status = InjectThunkLess(info, SectionHandle, SectionSize)))
 	{
 		UncryptDbg("[UncryptInjector] Error at inject thunk less: %ld\n ", Status);
@@ -428,19 +425,10 @@ InjectThunkLess(
 
 	PUNICODE_STRING DllPath = (PUNICODE_STRING)(AddressOfSection);
 	PWCHAR DllPathBuffer = (PWCHAR)((PWCHAR)DllPath + sizeof(UNICODE_STRING));
-	if (InjectionInfo->IsWoW64)
-	{
-		RtlCopyMemory(DllPathBuffer,
-			DLL_X32_PATH_TO_INJECT.Buffer,
-			DLL_X32_PATH_TO_INJECT.Length);
-	}
-	else
-	{
-		RtlCopyMemory(DllPathBuffer,
-			DLL_X64_PATH_TO_INJECT.Buffer,
-			DLL_X64_PATH_TO_INJECT.Length);
-	}
-
+	RtlCopyMemory(DllPathBuffer,
+		DLL_X64_PATH_TO_INJECT.Buffer,
+		DLL_X64_PATH_TO_INJECT.Length);
+	
 	RtlInitUnicodeString(DllPath, DllPathBuffer);
 	Status = UncryptApcQueue(
 		UserMode,
@@ -449,6 +437,7 @@ InjectThunkLess(
 		NULL,
 		DllPath
 	);
+	
 	UncryptDbg("[UncryptInjector] Finish Injecting\n");
 	//
 	// 4th param. of LdrLoadDll (BaseAddress) is actually an output parameter.
@@ -474,4 +463,58 @@ InjectThunkLess(
 	// https://www.sentinelone.com/blog/deep-hooks-monitoring-native-execution-wow64-applications-part-2
 	//
 	return Status;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////// Hooking functions ///////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+
+NTSTATUS NotifyUncryptorDLL(_UNCRYPT_INJECT_INFO *info, ULONG flag)
+{
+	return UncryptApcQueue(KernelMode,
+		&UncryptCallHookMethodNormalRouting,
+		info,
+		(PVOID)flag,
+		NULL);
+}
+
+VOID IterateOverFlagsAndNotify(_UNCRYPT_INJECT_INFO *info)
+{
+	ULONG flags = 0;
+	for (LONG index = 0; index < RTL_NUMBER_OF(DLLS_DESCRIPTORS); index++)
+	{
+		LONG DllFlag = DLLS_DESCRIPTORS[index].Flags;
+		if (DLLS_DESCRIPTORS[index].NeedToNotify)
+		{
+			flags |= DllFlag;
+		}
+	}
+	NotifyUncryptorDLL(info, flags);
+}
+
+VOID
+NTAPI
+UncryptCallHookMethodNormalRouting(
+	_In_ PVOID NormalContext, // the info
+	_In_ PVOID SystemArgument1, // the flag
+	_In_ PVOID SystemArgument2
+)
+{
+	UNREFERENCED_PARAMETER(SystemArgument2);
+	_UNCRYPT_INJECT_INFO *info = (_UNCRYPT_INJECT_INFO*)NormalContext;
+	ULONG flags = (ULONG)SystemArgument1;
+	UNICODE_STRING tmp;
+	
+	WCHAR buff[128];
+	tmp.Buffer = buff;
+	tmp.MaximumLength = 128;
+	tmp.Length = 0;
+	RtlIntegerToUnicodeString(flags, 0, &tmp);
+	UncryptApcQueue(
+		UserMode,
+		(PKNORMAL_ROUTINE)(ULONG_PTR)info->HookAllRoutineAddress,
+		&tmp,
+		NULL,
+		NULL
+	);
 }

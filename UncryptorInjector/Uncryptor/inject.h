@@ -1,8 +1,8 @@
 #pragma once
 extern "C"
 {
-	#include <ntddk.h>
-	#include <wdm.h> // for the linked list.
+#include <ntddk.h>
+#include <wdm.h> // for the linked list.
 	DRIVER_INITIALIZE DriverEntry;
 	VOID NTAPI DriverDestroy(PDRIVER_OBJECT DriverObject);
 	NTSTATUS NTAPI UncryptInit(_In_ PUNICODE_STRING RegisteryPath);
@@ -12,10 +12,12 @@ extern "C"
 	{
 		LIST_ENTRY ListEntry; // the list entry for the double linked list
 		BOOLEAN IsInjected; // check if is injected.
+		BOOLEAN IsLoaded; // Check if the dll is loaded into the process.
 		ULONG LoadedDlls; // flags for the dlls.
 		BOOLEAN IsWoW64; // is wow64 program...
 		HANDLE Process; // the key of the struct, the process id.
 		PVOID LdrLoadDllRoutineAddress;// the address of LdrloadDll
+		PVOID HookAllRoutineAddress; // address of the hook all function in the uncrypt dll.
 	};
 
 	_UNCRYPT_INJECT_INFO* SearchInList(HANDLE); // process handle to search in the linked list
@@ -25,4 +27,6 @@ extern "C"
 	BOOLEAN CanInject(_UNCRYPT_INJECT_INFO*);
 	NTSTATUS NTAPI UncryptorInject(_UNCRYPT_INJECT_INFO*);
 
+	NTSTATUS NotifyUncryptorDLL(_UNCRYPT_INJECT_INFO *info, ULONG flag);
+	VOID IterateOverFlagsAndNotify(_UNCRYPT_INJECT_INFO *info);
 }

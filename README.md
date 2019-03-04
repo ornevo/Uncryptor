@@ -5,4 +5,10 @@ The Uncryptor fights ransomware by collecting encryption keys at runtime from al
 Once a client got infected with ransomeware, the keys for decrypting the files will be stored safetly in the Uncryptor's servers,
 available for recovery.
 
-Made with :heart:
+Made with :heart:  
+
+# How to install  
+
+Enter the command line as administartor and enter:  
+bcdedit /set testsigning on  
+and restart the system.

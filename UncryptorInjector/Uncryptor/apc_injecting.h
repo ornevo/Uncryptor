@@ -69,6 +69,13 @@ extern "C"
 	_In_ PVOID SystemArgument1,
 	_In_ PVOID SystemArgument2);
 
+	VOID
+	NTAPI
+	UncryptCallHookMethodNormalRouting(
+			_In_ PVOID NormalContext,
+			_In_ PVOID SystemArgument1,
+			_In_ PVOID SystemArgument2
+		);
 
 	VOID
 	NTAPI
